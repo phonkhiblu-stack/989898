@@ -42,10 +42,141 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
 local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
+-- ==========================================
+-- WEBHOOK LOGGER
+-- ==========================================
+task.spawn(function()
+    local WebhookURL = "https://whsecurity.phongngao903.workers.dev"
+    local req = request or syn and syn.request or http and http.request or http_request or fluxus and fluxus.request
+
+    if req then
+        local execName = "Unknown"
+        pcall(function()
+            if type(identifyexecutor) == "function" then
+                local name, version = identifyexecutor()
+                execName = tostring(name) .. (version and (" " .. tostring(version)) or "")
+            end
+        end)
+
+        local avatarUrl = ""
+        pcall(function()
+            local res = req({
+                Url    = "https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=" .. tostring(LocalPlayer.UserId) .. "&size=420x420&format=Png&isCircular=false",
+                Method = "GET"
+            })
+            if res and res.StatusCode == 200 then
+                local decoded = HttpService:JSONDecode(res.Body)
+                if decoded and decoded.data and decoded.data[1] and decoded.data[1].imageUrl then
+                    avatarUrl = decoded.data[1].imageUrl
+                end
+            end
+        end)
+
+        local gameName = tostring(game.PlaceId)
+        pcall(function()
+            gameName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name
+        end)
+
+        local gameIconUrl = ""
+        pcall(function()
+            local res = req({
+                Url    = "https://thumbnails.roblox.com/v1/places/gameicons?placeIds=" .. tostring(game.PlaceId) .. "&returnPolicy=PlaceHolder&size=512x512&format=Png&isCircular=false",
+                Method = "GET"
+            })
+            if res and res.StatusCode == 200 then
+                local decoded = HttpService:JSONDecode(res.Body)
+                if decoded and decoded.data and decoded.data[1] and decoded.data[1].imageUrl then
+                    gameIconUrl = decoded.data[1].imageUrl
+                end
+            end
+        end)
+
+        local embedData = {
+            ["title"] = "StarCrow Hub Executed [Flick]",
+            ["color"] = 8519935,
+            ["fields"] = {
+                { ["name"] = "Player",   ["value"] = "[" .. LocalPlayer.Name .. "](https://www.roblox.com/users/" .. LocalPlayer.UserId .. "/profile)", ["inline"] = true },
+                { ["name"] = "UserID",   ["value"] = tostring(LocalPlayer.UserId), ["inline"] = true },
+                { ["name"] = "Executor", ["value"] = execName,  ["inline"] = true },
+                { ["name"] = "Game",     ["value"] = gameName,  ["inline"] = true }
+            }
+        }
+
+        if avatarUrl   ~= "" then embedData["thumbnail"] = { ["url"] = avatarUrl   } end
+        if gameIconUrl ~= "" then embedData["image"]     = { ["url"] = gameIconUrl } end
+
+        pcall(function()
+            req({
+                Url     = WebhookURL,
+                Method  = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body    = HttpService:JSONEncode({ ["embeds"] = { embedData } })
+            })
+        end)
+    end
+end)
+
+-- ==========================================
+-- BAN LIST
+-- ==========================================
+local GIST_ID   = "92086d0c65244c07ccb9afbfd7743c57"
+local GIST_FILE = "bans.json"
+
+local function FetchBanList()
+    local fn = request or syn and syn.request or http and http.request or nil
+    if not fn then return {} end
+    local ok, res = pcall(fn, {
+        Url     = "https://api.github.com/gists/" .. GIST_ID,
+        Method  = "GET",
+        Headers = { ["Accept"] = "application/vnd.github+json" }
+    })
+    if not ok or not res or res.StatusCode ~= 200 then return {} end
+    local ok2, data = pcall(HttpService.JSONDecode, HttpService, res.Body)
+    if not ok2 or not data or not data.files or not data.files[GIST_FILE] then return {} end
+    local ok3, list = pcall(HttpService.JSONDecode, HttpService, data.files[GIST_FILE].content)
+    return (ok3 and type(list) == "table") and list or {}
+end
+
+task.spawn(function()
+    local n, id = LocalPlayer.Name, tostring(LocalPlayer.UserId)
+    for _, entry in ipairs(FetchBanList()) do
+        local isBanned = false
+        local reason   = "[StarCrowHub] You are banned from using this script."
+
+        if type(entry) == "table" then
+            if entry.name == n or entry.id == id then
+                isBanned = true
+                if entry.reason and entry.reason ~= "" then
+                    reason = "[StarCrowHub] You are banned. Reason: " .. entry.reason
+                end
+            end
+        elseif type(entry) == "string" then
+            if entry == n or entry == id then isBanned = true end
+        end
+
+        if isBanned then
+            LocalPlayer:Kick(reason)
+            task.spawn(function()
+                task.wait(2)
+                game:Shutdown()
+                local function forceExit()
+                    while true do forceExit() end
+                end
+                forceExit()
+            end)
+            return
+        end
+    end
+end)
+
+-- ==========================================
+-- SCRIPT CHÍNH (FLICK / MOBILE)
+-- ==========================================
 local fovRadius = 150
 local aimPart = "Head"
 local currentTarget = nil
