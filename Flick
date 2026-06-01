@@ -1,0 +1,321 @@
+local getreg = getreg or debug.getregistry
+local getgc = getgc or getgc
+local isfunctionhooked = isfunctionhooked or function() return false end
+
+local function InitAdonisBypass()
+    if not getreg or not getgc then return false end
+    local AdonisAnticheatThreads = {}
+    for _, thread in getreg() do
+        if typeof(thread) ~= "thread" then continue end
+        local Source = debug.info(thread, 1, "s")
+        if Source and (Source:match("%.Core%.Anti") or Source:match("%.Plugins%.Anti_Cheat")) then
+            table.insert(AdonisAnticheatThreads, thread)
+        end
+    end
+    for _, thread in AdonisAnticheatThreads do pcall(coroutine.close, thread) end
+    local AdonisTables = {}
+    if filtergc then
+        local candidates = filtergc("table", { Keys = { "Detected", "RLocked" } }, false)
+        for _, t in candidates do
+            if typeof(rawget(t, "Detected")) == "function" then table.insert(AdonisTables, t) end
+        end
+    else
+        for _, t in getgc(true) do
+            if typeof(t) == "table" and typeof(rawget(t, "Detected")) == "function" and rawget(t, "RLocked") ~= nil then
+                table.insert(AdonisTables, t)
+            end
+        end
+    end
+    for _, AdonisTable in AdonisTables do
+        for _, DetectionFunc in AdonisTable do
+            if typeof(DetectionFunc) == "function" and not isfunctionhooked(DetectionFunc) then
+                hookfunction(DetectionFunc, function() coroutine.yield() return task.wait(9e9) end)
+            end
+        end
+    end
+    return true
+end
+
+InitAdonisBypass()
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+local fovRadius = 150
+local aimPart = "Head"
+local currentTarget = nil
+local isHoldingGun = false
+
+local SilentAimEnabled = false
+local ESPEnabled = false
+local NoSpreadEnabled = false
+local FastReloadEnabled = false
+
+local fovGui = Instance.new("ScreenGui")
+fovGui.Name = "FOVScreen"
+fovGui.Parent = CoreGui
+fovGui.IgnoreGuiInset = true
+
+local fovCircle = Instance.new("Frame")
+fovCircle.Size = UDim2.new(0, fovRadius * 2, 0, fovRadius * 2)
+fovCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+fovCircle.Position = UDim2.new(0.5, 0, 0.5, 0)
+fovCircle.BackgroundTransparency = 1
+fovCircle.Visible = false
+fovCircle.Parent = fovGui
+
+local cornerFov = Instance.new("UICorner")
+cornerFov.CornerRadius = UDim.new(1, 0)
+cornerFov.Parent = fovCircle
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = Color3.fromRGB(0, 255, 127)
+stroke.Thickness = 2
+stroke.Parent = fovCircle
+
+local ESPBoxes = {}
+local function CreateESP(player)
+    local box = Drawing.new("Square")
+    box.Visible = false
+    box.Color = Color3.fromRGB(255, 50, 50)
+    box.Thickness = 1.5
+    box.Filled = false
+    ESPBoxes[player] = box
+end
+
+local function RemoveESP(player)
+    if ESPBoxes[player] then
+        ESPBoxes[player]:Remove()
+        ESPBoxes[player] = nil
+    end
+end
+
+for _, v in pairs(Players:GetPlayers()) do
+    if v ~= LocalPlayer then CreateESP(v) end
+end
+Players.PlayerAdded:Connect(CreateESP)
+Players.PlayerRemoving:Connect(RemoveESP)
+
+local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+
+local Window = Fluent:CreateWindow({
+    Title = "[Fps] Flick",
+    SubTitle = "Mobile",
+    TabWidth = 110,
+    Size = UDim2.new(0, 380, 0, 260), 
+    Acrylic = false,
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.LeftControl
+})
+
+local ToggleGui = Instance.new("ScreenGui")
+ToggleGui.Name = "FluentToggleGui"
+ToggleGui.Parent = CoreGui
+ToggleGui.IgnoreGuiInset = true
+
+local ToggleBtn = Instance.new("ImageButton")
+ToggleBtn.Parent = ToggleGui
+ToggleBtn.Position = UDim2.new(0, 15, 0.5, -22.5) 
+ToggleBtn.Size = UDim2.new(0, 45, 0, 45)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+ToggleBtn.Image = "rbxthumb://type=Asset&id=115542332056889&w=150&h=150"
+
+local UICornerBtn = Instance.new("UICorner")
+UICornerBtn.CornerRadius = UDim.new(0, 8) 
+UICornerBtn.Parent = ToggleBtn
+
+ToggleBtn.MouseButton1Click:Connect(function()
+    Window:Minimize()
+end)
+
+local dragging, dragInput, dragStart, startPos
+ToggleBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = ToggleBtn.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+        end)
+    end
+end)
+ToggleBtn.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        ToggleBtn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+local Tabs = {
+    Main = Window:AddTab({ Title = "Main", Icon = "crosshair" }),
+    ESP = Window:AddTab({ Title = "ESP", Icon = "eye" })
+}
+
+Tabs.Main:AddToggle("SilentAimToggle", {
+    Title = "Silent Aim",
+    Default = false,
+    Callback = function(state)
+        SilentAimEnabled = state
+        fovCircle.Visible = state
+    end 
+})
+
+Tabs.Main:AddToggle("NoSpreadToggle", {
+    Title = "No Spread",
+    Default = false,
+    Callback = function(state)
+        NoSpreadEnabled = state
+    end 
+})
+
+Tabs.Main:AddToggle("FastReloadToggle", {
+    Title = "Fast Reload",
+    Default = false,
+    Callback = function(state)
+        FastReloadEnabled = state
+    end 
+})
+
+Tabs.Main:AddSlider("FOVSlider", {
+    Title = "Fov",
+    Description = "Chỉnh kích thước vòng FOV",
+    Default = 150,
+    Min = 50,
+    Max = 400,
+    Rounding = 1,
+    Callback = function(Value)
+        fovRadius = tonumber(Value) or 150
+        fovCircle.Size = UDim2.new(0, fovRadius * 2, 0, fovRadius * 2)
+    end
+})
+
+Tabs.ESP:AddToggle("ESPToggle", {
+    Title = "ESP Outline",
+    Default = false,
+    Callback = function(state)
+        ESPEnabled = state
+    end 
+})
+
+Window:SelectTab(1)
+
+local OriginalGunConfigs = {}
+task.spawn(function()
+    while task.wait(1) do
+        for _, v in pairs(getgc(true)) do
+            if type(v) == "table" and rawget(v, "reloadTime") ~= nil and rawget(v, "DamageDropoff") ~= nil and rawget(v, "PelletAmount") ~= nil then
+                if not OriginalGunConfigs[v] then
+                    OriginalGunConfigs[v] = {
+                        reloadTime = v.reloadTime,
+                        spread = v.spread
+                    }
+                end
+                v.reloadTime = FastReloadEnabled and 0.05 or OriginalGunConfigs[v].reloadTime
+                v.spread = NoSpreadEnabled and 0 or OriginalGunConfigs[v].spread
+            end
+        end
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    local char = LocalPlayer.Character
+    isHoldingGun = char and char:FindFirstChildOfClass("Tool") ~= nil
+    
+    local target = nil
+    if SilentAimEnabled and isHoldingGun then
+        local shortestDist = fovRadius
+        local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        fovCircle.Position = UDim2.new(0, center.X, 0, center.Y)
+
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player == LocalPlayer or not player.Character then continue end
+            local hum = player.Character:FindFirstChildOfClass("Humanoid")
+            local part = player.Character:FindFirstChild(aimPart)
+            
+            if hum and hum.Health > 0 and part then
+                local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                if onScreen then
+                    local dist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+                    if dist < shortestDist then
+                        target = part
+                        shortestDist = dist
+                    end
+                end
+            end
+        end
+    end
+    
+    if target and target:IsDescendantOf(LocalPlayer.Character) then 
+        currentTarget = nil 
+    else 
+        currentTarget = target 
+    end
+    
+    stroke.Color = currentTarget and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(0, 255, 127)
+
+    for player, box in pairs(ESPBoxes) do
+        if ESPEnabled and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChildOfClass("Humanoid") and player.Character.Humanoid.Health > 0 then
+            local hrp = player.Character.HumanoidRootPart
+            local pos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+            
+            if onScreen then
+                local scale = 1000 / pos.Z
+                local size = Vector2.new(2.5 * scale, 3.5 * scale)
+                box.Size = size
+                box.Position = Vector2.new(pos.X - size.X / 2, pos.Y - size.Y / 2)
+                box.Visible = true
+            else
+                box.Visible = false
+            end
+        else
+            box.Visible = false
+        end
+    end
+end)
+
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+    local args = {...}
+    local method = getnamecallmethod()
+    
+    if SilentAimEnabled and currentTarget and isHoldingGun then
+        if method == "Raycast" or method == "FindPartOnRay" or method == "FindPartOnRayWithIgnoreList" then
+            if not checkcaller() then
+                local origin = (method == "Raycast") and args[1] or args[1].Origin
+                local targetPos = currentTarget.Position
+                local diff = targetPos - origin
+                local dist = diff.Magnitude
+                
+                if dist > 0 then
+                    local unitDir = diff.Unit
+                    local finalDir = unitDir * (dist < 50 and dist or 10000)
+                    
+                    if method == "Raycast" then
+                        args[2] = finalDir
+                    else
+                        args[1] = Ray.new(origin, finalDir)
+                    end
+                end
+                return oldNamecall(self, unpack(args))
+            end
+        end
+    end
+    
+    if method == "FireServer" and tostring(self) == "CheckShotEvent" then
+        if SilentAimEnabled and currentTarget then
+            args[6] = currentTarget.Position
+            args[7] = currentTarget
+        end
+        return oldNamecall(self, unpack(args))
+    end
+    
+    return oldNamecall(self, ...)
+end))
