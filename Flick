@@ -186,8 +186,8 @@ Tabs.Main:AddToggle("FastReloadToggle", {
 
 Tabs.Main:AddSlider("FOVSlider", {
     Title = "Fov",
-    Description = "Chỉnh kích thước vòng FOV",
-    Default = 150,
+    Description = "FovCircle",
+    Default = 80,
     Min = 50,
     Max = 400,
     Rounding = 1,
